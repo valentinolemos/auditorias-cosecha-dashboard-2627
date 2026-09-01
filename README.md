@@ -45,7 +45,10 @@ este Sheet (a diferencia del 25/26) — se deriva en `buildRecord()` a partir de
 ## Publicación
 
 `index.html` es un único archivo autónomo (incluye Chart.js embebido). Se sirve
-por GitHub Pages desde la raíz de `main`.
+desde Vercel (mismo hosting que [la app](https://github.com/valentinolemos/auditorias-cosecha-app)):
+**https://auditorias-cosecha-dashboard-2627.vercel.app**
+
+Para publicar un cambio: `npx vercel --prod` desde esta carpeta.
 
 Para apuntar a otra fuente de datos sin tocar el código:
 `index.html?csv=<URL_de_un_CSV>`
