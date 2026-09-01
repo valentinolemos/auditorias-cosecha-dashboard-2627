@@ -11,10 +11,9 @@ que cargan cada dashboard por separado vía `<iframe>`:
   (campaña 25/26, no se toca) apuntada a los datos de la campaña nueva.
 - **`siembra.html`** — densidad de semilla y de fertilizante aplicado en la siembra,
   por cultivo. Mismo diseño y CSS que Cosecha, adaptado a los campos reales de esa labor.
-- **`fertilizacion.html`** — todavía un placeholder ("Próximamente"), armado cuando
-  haya volumen real de datos.
+- **`fertilizacion.html`** — dosis de fertilizante aplicado, mismo criterio que Siembra.
 
-Parte de [[App Auditorías de Maquinaria]] — Hitos 5 y 7.
+Parte de [[App Auditorías de Maquinaria]] — Hitos 5 y 7. Las 3 pestañas están completas.
 
 ## Por qué pestañas y no todo junto
 
@@ -63,6 +62,16 @@ separado, misma fórmula que Cosecha (`diferencia = inicial − final`,
 `kg = diferencia × superficie`). **No hay clasificación conforme/no conforme** —
 Siembra no tiene columna de tolerancia, el panel solo muestra el desvío real contra
 el objetivo cargado en cada auditoría.
+
+### Columnas — Fertilización
+
+`FECHA, ZONA, ENCARGADO, ESTABLECIMIENTO, SUPERFICIE, CULTIVO, CONTRATISTA,
+FERTILIZADORA, SISTEMA, DISTANCIAMIENTO, PROFUNDIDAD, KG OBJETIVO, KG INICIAL,
+KG FINAL, DIFERENCIA, KG RECUPERADO, % MINUTA, OBSERVACIONES`
+
+Misma fórmula de diferencia/kg recuperado que Cosecha y Siembra. Tampoco tiene
+columna de tolerancia — no hay clasificación conforme/no conforme, solo desvío
+real contra el objetivo.
 
 ## Publicación
 
