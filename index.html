@@ -655,7 +655,7 @@ function buildRecord(row,i){
 function buildAll(rows){ return rows.map(buildRecord).filter(r=>r.fecha); }
 
 let RAW_DATA = buildAll(SEED_DATA);
-let DATA_SOURCE = 'datos embebidos (respaldo)';
+let DATA_SOURCE = SEED_DATA.length ? 'datos embebidos (respaldo)' : 'sin datos todavia';
 
 /* ---------- refresco desde la Google Sheet ---------- */
 async function refreshFromSheet(){
@@ -664,9 +664,11 @@ async function refreshFromSheet(){
     const res = await fetch(CSV_URL, {cache:'no-store'});
     if(!res.ok) throw new Error('HTTP '+res.status);
     const recs = buildAll(csvToRows(await res.text()));
-    if(!recs.length) throw new Error('planilla sin filas validas');
+    // 0 filas es un estado valido (todavia no se cargo ninguna auditoria
+    // esta campana) -- no es un error de lectura, a diferencia de la
+    // campana 25/26 que siempre tenia el historico como piso.
     RAW_DATA = recs;
-    DATA_SOURCE = 'Google Sheet';
+    DATA_SOURCE = recs.length ? 'Google Sheet' : 'Google Sheet (sin auditorías cargadas todavía)';
     reloadDashboard();
   }catch(err){
     DATA_SOURCE = 'datos embebidos (no se pudo leer la planilla)';
