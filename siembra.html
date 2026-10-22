@@ -255,8 +255,10 @@
   <div class="filters">
     <div class="filter-group"><label>Desde</label><input type="date" id="fDesde"></div>
     <div class="filter-group"><label>Hasta</label><input type="date" id="fHasta"></div>
+    <div class="filter-group"><label>Unidad de negocio</label><select id="fUnidad" multiple></select></div>
     <div class="filter-group"><label>Zona</label><select id="fZona" multiple></select></div>
     <div class="filter-group"><label>Encargado</label><select id="fEncargado" multiple></select></div>
+    <div class="filter-group"><label>Auditor</label><select id="fAuditor" multiple></select></div>
     <div class="filter-group"><label>Establecimiento</label><select id="fEstablecimiento" multiple></select></div>
     <div class="filter-group"><label>Cultivo</label><select id="fCultivo" multiple></select></div>
     <div class="filter-group"><label>Contratista</label><select id="fContratista" multiple></select></div>
@@ -384,7 +386,10 @@
 const SEED_DATA = []; // vacio: los datos se leen en vivo de Supabase
 
 /* ---------- fila de Supabase -> forma que espera buildRecord() ---------- */
+function _rel(v){ return Array.isArray(v) ? v[0] : v; }
 function mapSupabaseRow(r){
+  const auditorRel = _rel(r.auditor);
+  const unidadRel = _rel(r.unidad);
   return {
     id: r.id,
     fecha: r.fecha,
@@ -412,6 +417,8 @@ function mapSupabaseRow(r){
     fertilizante_densidad_final: r.fertilizante_densidad_final,
     pct_minuta: r.porcentaje_minuta,
     observacion: r.observacion,
+    auditor: (auditorRel && auditorRel.nombre) || '',
+    unidad_negocio: (unidadRel && unidadRel.nombre) || '',
   };
 }
 
@@ -449,6 +456,7 @@ function buildRecord(row,i){
     semObj: sem.obj, semIni: sem.ini, semFin: sem.fin, semDif: sem.dif, semKg: sem.kg,
     fertObj: fert.obj, fertIni: fert.ini, fertFin: fert.fin, fertDif: fert.dif, fertKg: fert.kg,
     porcentajeMinuta:_s(row.pct_minuta), observacion:_s(row.observacion),
+    auditor:_up(row.auditor), unidad_negocio:_up(row.unidad_negocio),
   };
 }
 function buildAll(rows){ return rows.map(buildRecord).filter(r=>r.fecha); }
@@ -468,7 +476,7 @@ async function refreshFromSheet(){
       return;
     }
     const vista = new URLSearchParams(location.search).get('vista');
-    let query = supabaseClient.from('auditorias_siembra').select('*');
+    let query = supabaseClient.from('auditorias_siembra').select('*, auditor:usuarios(nombre), unidad:unidades_negocio(nombre)');
     if(vista === 'mia') query = query.eq('auditor_id', actual.session.user.id);
     const { data, error } = await query;
     if(error) throw error;
@@ -501,8 +509,10 @@ function reloadDashboard(){
   applyFilters();
 }
 function rebuildFilters(){
+  populateSelect('fUnidad','unidad_negocio');
   populateSelect('fZona','zona');
   populateSelect('fEncargado','encargado');
+  populateSelect('fAuditor','auditor');
   populateSelect('fEstablecimiento','establecimiento');
   populateSelect('fCultivo','cultivo');
   populateSelect('fContratista','contratista');
@@ -543,15 +553,19 @@ function getSelected(id){
 function applyFilters(){
   const desde = document.getElementById('fDesde').value;
   const hasta = document.getElementById('fHasta').value;
+  const unidades = getSelected('fUnidad');
   const zonas = getSelected('fZona'), encargados = getSelected('fEncargado'), establecimientos = getSelected('fEstablecimiento');
+  const auditores = getSelected('fAuditor');
   const cultivos = getSelected('fCultivo'), contratistas = getSelected('fContratista'), marcas = getSelected('fMarca');
   const dosificadores = getSelected('fDosificador'), cortes = getSelected('fCorte'), variables = getSelected('fVariable');
 
   filtered = RAW_DATA.filter(d => {
     if(desde && d.fecha < desde) return false;
     if(hasta && d.fecha > hasta) return false;
+    if(unidades.length && !unidades.includes(d.unidad_negocio)) return false;
     if(zonas.length && !zonas.includes(d.zona)) return false;
     if(encargados.length && !encargados.includes(d.encargado)) return false;
+    if(auditores.length && !auditores.includes(d.auditor)) return false;
     if(establecimientos.length && !establecimientos.includes(d.establecimiento)) return false;
     if(cultivos.length && !cultivos.includes(d.cultivo)) return false;
     if(contratistas.length && !contratistas.includes(d.contratista)) return false;
@@ -562,7 +576,7 @@ function applyFilters(){
     return true;
   });
 
-  const totalFiltros = [zonas,encargados,establecimientos,cultivos,contratistas,marcas,dosificadores,cortes,variables].reduce((a,f)=>a+f.length,0) + (desde?1:0) + (hasta?1:0);
+  const totalFiltros = [unidades,zonas,encargados,auditores,establecimientos,cultivos,contratistas,marcas,dosificadores,cortes,variables].reduce((a,f)=>a+f.length,0) + (desde?1:0) + (hasta?1:0);
   document.getElementById('filterCount').textContent = totalFiltros ? `${totalFiltros} filtro(s) activo(s)` : '';
 
   currentPage = 1;
@@ -830,13 +844,13 @@ function renderDQ(){
 
 document.getElementById('fDesde').addEventListener('change', applyFilters);
 document.getElementById('fHasta').addEventListener('change', applyFilters);
-['fZona','fEncargado','fEstablecimiento','fCultivo','fContratista','fMarca','fDosificador','fCorte','fVariable'].forEach(id => {
+['fUnidad','fZona','fEncargado','fAuditor','fEstablecimiento','fCultivo','fContratista','fMarca','fDosificador','fCorte','fVariable'].forEach(id => {
   document.getElementById(id).addEventListener('change', applyFilters);
 });
 document.getElementById('resetBtn').addEventListener('click', () => {
   document.getElementById('fDesde').value = '';
   document.getElementById('fHasta').value = '';
-  ['fZona','fEncargado','fEstablecimiento','fCultivo','fContratista','fMarca','fDosificador','fCorte','fVariable'].forEach(id => {
+  ['fUnidad','fZona','fEncargado','fAuditor','fEstablecimiento','fCultivo','fContratista','fMarca','fDosificador','fCorte','fVariable'].forEach(id => {
     Array.from(document.getElementById(id).options).forEach(o => o.selected = false);
   });
   document.getElementById('tableSearch').value = '';

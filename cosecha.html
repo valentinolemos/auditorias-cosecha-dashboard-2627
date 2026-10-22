@@ -262,12 +262,20 @@
       <input type="date" id="fHasta">
     </div>
     <div class="filter-group">
+      <label>Unidad de negocio</label>
+      <select id="fUnidad" multiple></select>
+    </div>
+    <div class="filter-group">
       <label>Zona</label>
       <select id="fZona" multiple></select>
     </div>
     <div class="filter-group">
       <label>Encargado</label>
       <select id="fEncargado" multiple></select>
+    </div>
+    <div class="filter-group">
+      <label>Auditor</label>
+      <select id="fAuditor" multiple></select>
     </div>
     <div class="filter-group">
       <label>Establecimiento</label>
@@ -565,7 +573,11 @@
 const SEED_DATA = []; // vacio: los datos se leen en vivo de Supabase
 
 /* ---------- fila de Supabase -> forma que espera buildRecord() ---------- */
+// supabase-js, sin tipos generados, puede traer un embed "a uno" como array.
+function _rel(v){ return Array.isArray(v) ? v[0] : v; }
 function mapSupabaseRow(r){
+  const auditorRel = _rel(r.auditor);
+  const unidadRel = _rel(r.unidad);
   return {
     id: r.id,
     fecha: r.fecha,
@@ -584,6 +596,8 @@ function mapSupabaseRow(r){
     tolerancia: r.tolerancia,
     perdida_inicial: r.perdida_inicial,
     perdida_final: r.perdida_final,
+    auditor: (auditorRel && auditorRel.nombre) || '',
+    unidad_negocio: (unidadRel && unidadRel.nombre) || '',
   };
 }
 
@@ -634,7 +648,8 @@ function buildRecord(row,i){
     tolerancia,
     perdida_inicial: pi, perdida_final: pf,
     diferencia: dif, kg_recuperados: kg,
-    resultado
+    resultado,
+    auditor: _up(row.auditor), unidad_negocio: _up(row.unidad_negocio),
   };
 }
 function buildAll(rows){ return rows.map(buildRecord).filter(r=>r.fecha); }
@@ -655,7 +670,7 @@ async function refreshFromSheet(){
       return;
     }
     const vista = new URLSearchParams(location.search).get('vista');
-    let query = supabaseClient.from('auditorias_cosecha').select('*');
+    let query = supabaseClient.from('auditorias_cosecha').select('*, auditor:usuarios(nombre), unidad:unidades_negocio(nombre)');
     if(vista === 'mia') query = query.eq('auditor_id', actual.session.user.id);
     const { data, error } = await query;
     if(error) throw error;
@@ -690,7 +705,7 @@ function reloadDashboard(){
   applyFilters();
 }
 function rebuildFilters(){
-  const map={fZona:'zona',fEncargado:'encargado',fEstablecimiento:'establecimiento',fCultivo:'cultivo',fContratista:'contratista',fPlataforma:'plataforma',fMarca:'marca'};
+  const map={fUnidad:'unidad_negocio',fZona:'zona',fEncargado:'encargado',fAuditor:'auditor',fEstablecimiento:'establecimiento',fCultivo:'cultivo',fContratista:'contratista',fPlataforma:'plataforma',fMarca:'marca'};
   Object.keys(map).forEach(id=>{
     const sel=document.getElementById(id); if(!sel) return;
     const prev=new Set([...sel.selectedOptions].map(o=>o.value));
@@ -780,8 +795,10 @@ function populateSelect(id, key){
     sel.appendChild(opt);
   });
 }
+populateSelect('fUnidad','unidad_negocio');
 populateSelect('fZona','zona');
 populateSelect('fEncargado','encargado');
+populateSelect('fAuditor','auditor');
 populateSelect('fEstablecimiento','establecimiento');
 populateSelect('fCultivo','cultivo');
 populateSelect('fContratista','contratista');
@@ -805,8 +822,10 @@ function getSelected(id){
 function applyFilters(){
   const desde = document.getElementById('fDesde').value;
   const hasta = document.getElementById('fHasta').value;
+  const unidades = getSelected('fUnidad');
   const zonas = getSelected('fZona');
   const encargados = getSelected('fEncargado');
+  const auditores = getSelected('fAuditor');
   const establecimientos = getSelected('fEstablecimiento');
   const cultivos = getSelected('fCultivo');
   const contratistas = getSelected('fContratista');
@@ -817,8 +836,10 @@ function applyFilters(){
   filtered = RAW_DATA.filter(d=>{
     if(desde && d.fecha < desde) return false;
     if(hasta && d.fecha > hasta) return false;
+    if(unidades.length && !unidades.includes(d.unidad_negocio)) return false;
     if(zonas.length && !zonas.includes(d.zona)) return false;
     if(encargados.length && !encargados.includes(d.encargado)) return false;
+    if(auditores.length && !auditores.includes(d.auditor)) return false;
     if(establecimientos.length && !establecimientos.includes(d.establecimiento)) return false;
     if(cultivos.length && !cultivos.includes(d.cultivo)) return false;
     if(contratistas.length && !contratistas.includes(d.contratista)) return false;
@@ -828,7 +849,7 @@ function applyFilters(){
     return true;
   });
 
-  const activeFilters = [desde,hasta,...zonas,...encargados,...establecimientos,...cultivos,...contratistas,...plataformas,...marcas,...resultados].filter(Boolean).length;
+  const activeFilters = [desde,hasta,...unidades,...zonas,...encargados,...auditores,...establecimientos,...cultivos,...contratistas,...plataformas,...marcas,...resultados].filter(Boolean).length;
   document.getElementById('filterCount').textContent = activeFilters>0 ? `${filtered.length} de ${RAW_DATA.length} registros` : '';
 
   currentPage = 1;
@@ -836,13 +857,13 @@ function applyFilters(){
 }
 
 ['fDesde','fHasta'].forEach(id=>document.getElementById(id).addEventListener('change', applyFilters));
-['fZona','fEncargado','fEstablecimiento','fCultivo','fContratista','fPlataforma','fMarca','fResultado'].forEach(id=>{
+['fUnidad','fZona','fEncargado','fAuditor','fEstablecimiento','fCultivo','fContratista','fPlataforma','fMarca','fResultado'].forEach(id=>{
   document.getElementById(id).addEventListener('change', applyFilters);
 });
 document.getElementById('resetBtn').addEventListener('click', ()=>{
   document.getElementById('fDesde').value='';
   document.getElementById('fHasta').value='';
-  ['fZona','fEncargado','fEstablecimiento','fCultivo','fContratista','fPlataforma','fMarca','fResultado'].forEach(id=>{
+  ['fUnidad','fZona','fEncargado','fAuditor','fEstablecimiento','fCultivo','fContratista','fPlataforma','fMarca','fResultado'].forEach(id=>{
     [...document.getElementById(id).options].forEach(o=>o.selected=false);
   });
   applyFilters();
