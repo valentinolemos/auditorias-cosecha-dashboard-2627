@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard · Auditorías de Cosecha 26/27</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="supabase-client.js"></script>
+<script src="auth.js"></script>
 <script>
 /*!
  * Chart.js v4.4.4
@@ -529,7 +532,7 @@
   </details>
 
   <footer class="note">
-    Datos leídos en vivo desde una <a href="https://docs.google.com/spreadsheets/d/1tQobZbLsqz9N2O2zt2bgQEiKmXR-BEjXbXnQ1muZo5g/edit" target="_blank" rel="noopener">Google Sheet</a>. Editá la planilla y recargá esta página para actualizar.<br>
+    Datos leídos en vivo desde la base de la app de auditorías. Se cargan desde la tablet en el campo y aparecen acá apenas sincronizan.<br>
     Los cálculos de pérdidas y kg ganados se basan exclusivamente en los datos del archivo. La valorización en USD es una estimación calculada con los precios cargados en el panel de precios.
   </footer>
 </div>
@@ -545,61 +548,43 @@
 
 <script>
 /* ============================================================
-   ORIGEN DE DATOS  —  Google Sheet en vivo
+   ORIGEN DE DATOS  —  Supabase en vivo (RLS por unidad de negocio)
    ------------------------------------------------------------
-   Los datos se leen de esta Google Sheet. Para actualizarlos:
-   abrir la planilla, editar / agregar filas y recargar este panel.
-     https://docs.google.com/spreadsheets/d/1tQobZbLsqz9N2O2zt2bgQEiKmXR-BEjXbXnQ1muZo5g/edit
-   La planilla debe estar compartida como "Cualquiera con el enlace: Lector".
-   Si no se puede leer, el panel usa los datos embebidos de respaldo (SEED_DATA).
-   Se puede apuntar a otra fuente con  ?csv=<URL_de_un_CSV>  en la direccion.
+   Los datos se leen de la tabla auditorias_cosecha de Supabase, con la
+   misma cuenta de Google con la que entra el usuario. RLS filtra
+   automaticamente a su unidad de negocio (o a todas si es gerencia).
+   El parametro ?vista=mia filtra ademas a sus propias auditorias.
 
-   Columnas que mantiene la planilla:
+   Columnas que trae la tabla:
      id, fecha (AAAA-MM-DD), zona, encargado, establecimiento, superficie,
      cultivo, contratista, cosechadora, marca, plataforma, pies, pmg, humedad,
      tolerancia, perdida_inicial, perdida_final, resultado
    Se calculan solos:  diferencia = perdida_inicial - perdida_final
                        kg_recuperados = superficie * diferencia
    ============================================================ */
-const SHEET_ID  = '1cCgO78Iss02ke5XRgS2vLjInGWcXYJYZS9cyPtNeTR0'; // "Auditoria Cosecha - App (26-27)", pestaña "Cosecha"
-const SHEET_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
-const CSV_URL   =
-  new URLSearchParams(location.search).get('csv') ||
-  ('https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/export?format=csv');
+const SEED_DATA = []; // vacio: los datos se leen en vivo de Supabase
 
-const SEED_DATA = []; // vacio: la campana 26-27 arranca sin historico, se carga en vivo desde el Sheet
-
-/* ---------- parseo de CSV (soporta comillas, comas y saltos de linea) ---------- */
-function parseCSV(text){
-  const rows=[]; let row=[], cur='', q=false;
-  for(let i=0;i<text.length;i++){
-    const c=text[i];
-    if(q){
-      if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; }
-      else cur+=c;
-    } else {
-      if(c==='"') q=true;
-      else if(c===','){ row.push(cur); cur=''; }
-      else if(c==='\n'){ row.push(cur); rows.push(row); row=[]; cur=''; }
-      else if(c!=='\r') cur+=c;
-    }
-  }
-  if(cur!==''||row.length){ row.push(cur); rows.push(row); }
-  return rows;
-}
-function csvToRows(text){
-  const raw=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!==''));
-  if(raw.length<2) return [];
-  // el Sheet de la app 26-27 usa encabezados en mayúsculas con espacios
-  // (ej. "PERDIDA INICIAL", "MODELO"); se normalizan a snake_case para
-  // que calcen con las claves que espera buildRecord() más abajo.
-  const head=raw[0].map(h=>h.trim().toLowerCase().replace(/%/g,'pct').replace(/\s+/g,'_'));
-  return raw.slice(1).map(r=>{
-    const o={};
-    head.forEach((h,i)=>o[h]=(r[i]==null?'':r[i]).trim());
-    if(o.marca===undefined && o.modelo!==undefined) o.marca=o.modelo; // MODELO (app) = marca (dashboard)
-    return o;
-  });
+/* ---------- fila de Supabase -> forma que espera buildRecord() ---------- */
+function mapSupabaseRow(r){
+  return {
+    id: r.id,
+    fecha: r.fecha,
+    zona: r.zona_texto || '',
+    encargado: r.encargado_texto || '',
+    establecimiento: r.establecimiento_texto || '',
+    contratista: r.contratista_texto || '',
+    cultivo: r.cultivo,
+    superficie: r.superficie,
+    marca: r.marca,
+    cosechadora: r.cosechadora,
+    plataforma: r.plataforma,
+    pies: r.pies,
+    pmg: r.pmg,
+    humedad: r.humedad,
+    tolerancia: r.tolerancia,
+    perdida_inicial: r.perdida_inicial,
+    perdida_final: r.perdida_final,
+  };
 }
 
 /* ---------- normalizacion + campos derivados ---------- */
@@ -657,22 +642,31 @@ function buildAll(rows){ return rows.map(buildRecord).filter(r=>r.fecha); }
 let RAW_DATA = buildAll(SEED_DATA);
 let DATA_SOURCE = SEED_DATA.length ? 'datos embebidos (respaldo)' : 'sin datos todavia';
 
-/* ---------- refresco desde la Google Sheet ---------- */
+/* ---------- refresco desde Supabase ---------- */
 async function refreshFromSheet(){
-  updateFuente('cargando planilla…');
+  updateFuente('cargando datos…');
   try{
-    const res = await fetch(CSV_URL, {cache:'no-store'});
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    const recs = buildAll(csvToRows(await res.text()));
+    const actual = await obtenerUsuarioActual();
+    if(!actual){
+      RAW_DATA = [];
+      DATA_SOURCE = 'no autenticado — entrá desde el panel principal';
+      reloadDashboard();
+      updateFuente(DATA_SOURCE);
+      return;
+    }
+    const vista = new URLSearchParams(location.search).get('vista');
+    let query = supabaseClient.from('auditorias_cosecha').select('*');
+    if(vista === 'mia') query = query.eq('auditor_id', actual.session.user.id);
+    const { data, error } = await query;
+    if(error) throw error;
     // 0 filas es un estado valido (todavia no se cargo ninguna auditoria
-    // esta campana) -- no es un error de lectura, a diferencia de la
-    // campana 25/26 que siempre tenia el historico como piso.
-    RAW_DATA = recs;
-    DATA_SOURCE = recs.length ? 'Google Sheet' : 'Google Sheet (sin auditorías cargadas todavía)';
+    // esta campana) -- no es un error de lectura.
+    RAW_DATA = buildAll((data||[]).map(mapSupabaseRow));
+    DATA_SOURCE = RAW_DATA.length ? 'Supabase' : 'Supabase (sin auditorías cargadas todavía)';
     reloadDashboard();
   }catch(err){
-    DATA_SOURCE = 'datos embebidos (no se pudo leer la planilla)';
-    console.warn('No se pudo leer la Google Sheet:', err);
+    DATA_SOURCE = 'error al leer la base (' + (err.message||err) + ')';
+    console.warn('No se pudo leer Supabase:', err);
   }
   updateFuente();
 }

@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard · Auditorías de Siembra 26/27</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="supabase-client.js"></script>
+<script src="auth.js"></script>
 <script>
 /*!
  * Chart.js v4.4.4
@@ -366,7 +369,7 @@
   </details>
 
   <footer class="note">
-    Datos leídos en vivo desde <a href="https://docs.google.com/spreadsheets/d/1cCgO78Iss02ke5XRgS2vLjInGWcXYJYZS9cyPtNeTR0/edit" target="_blank">este Google Sheet</a> (pestaña "Siembra"). Editá la planilla y recargá esta página para actualizar.<br>
+    Datos leídos en vivo desde la base de la app de auditorías. Se cargan desde la tablet en el campo y aparecen acá apenas sincronizan.<br>
     Diferencia y Kg recuperados se calculan en este panel a partir de los datos crudos de la planilla, para semilla y fertilizante por separado.
   </footer>
 
@@ -378,36 +381,38 @@
    del Sheet que alimenta la app de Diego Cavanillas.
    Se puede apuntar a otra fuente con  ?csv=<URL_de_un_CSV>  en la direccion.
    ============================================================ */
-const SHEET_ID  = '1cCgO78Iss02ke5XRgS2vLjInGWcXYJYZS9cyPtNeTR0';
-const SHEET_URL = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/edit';
-const CSV_URL   =
-  new URLSearchParams(location.search).get('csv') ||
-  ('https://docs.google.com/spreadsheets/d/' + SHEET_ID + '/gviz/tq?tqx=out:csv&sheet=Siembra');
+const SEED_DATA = []; // vacio: los datos se leen en vivo de Supabase
 
-const SEED_DATA = [];
-
-function parseCSV(text){
-  const rows=[]; let row=[], cur='', q=false;
-  for(let i=0;i<text.length;i++){
-    const c=text[i];
-    if(q){
-      if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; }
-      else cur+=c;
-    } else {
-      if(c==='"') q=true;
-      else if(c===','){ row.push(cur); cur=''; }
-      else if(c==='\n'){ row.push(cur); rows.push(row); row=[]; cur=''; }
-      else if(c!=='\r') cur+=c;
-    }
-  }
-  if(cur!==''||row.length){ row.push(cur); rows.push(row); }
-  return rows;
-}
-function csvToRows(text){
-  const raw=parseCSV(text).filter(r=>r.some(c=>String(c).trim()!==''));
-  if(raw.length<2) return [];
-  const head=raw[0].map(h=>h.trim().toLowerCase().replace(/%/g,'pct').replace(/\s+/g,'_'));
-  return raw.slice(1).map(r=>{ const o={}; head.forEach((h,i)=>o[h]=(r[i]==null?'':r[i]).trim()); return o; });
+/* ---------- fila de Supabase -> forma que espera buildRecord() ---------- */
+function mapSupabaseRow(r){
+  return {
+    id: r.id,
+    fecha: r.fecha,
+    zona: r.zona_texto || '',
+    encargado: r.encargado_texto || '',
+    establecimiento: r.establecimiento_texto || '',
+    contratista: r.contratista_texto || '',
+    cultivo: r.cultivo,
+    superficie: r.superficie,
+    sembradora: r.sembradora,
+    marca: r.marca,
+    distanciamiento: r.distanciamiento,
+    profundidad: r.profundidad,
+    dosificador: r.dosificador,
+    corte: r.corte === true ? 'SI' : r.corte === false ? 'NO' : '',
+    variable: r.variable === true ? 'SI' : r.variable === false ? 'NO' : '',
+    piloto: r.piloto,
+    'señal': r.senial,
+    pmg: r.pmg,
+    semilla_densidad_objetivo: r.semilla_densidad_objetivo,
+    semilla_densidad_inicial: r.semilla_densidad_inicial,
+    semilla_densidad_final: r.semilla_densidad_final,
+    fertilizante_densidad_objetivo: r.fertilizante_densidad_objetivo,
+    fertilizante_densidad_inicial: r.fertilizante_densidad_inicial,
+    fertilizante_densidad_final: r.fertilizante_densidad_final,
+    pct_minuta: r.porcentaje_minuta,
+    observacion: r.observacion,
+  };
 }
 
 function _n(v){ if(v===null||v===undefined||v==='') return null; const x=parseFloat(String(v).replace(/\s/g,'').replace(',','.')); return isNaN(x)?null:x; }
@@ -452,17 +457,27 @@ let RAW_DATA = buildAll(SEED_DATA);
 let DATA_SOURCE = SEED_DATA.length ? 'datos embebidos (respaldo)' : 'sin datos todavia';
 
 async function refreshFromSheet(){
-  updateFuente('cargando planilla…');
+  updateFuente('cargando datos…');
   try{
-    const res = await fetch(CSV_URL, {cache:'no-store'});
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    const recs = buildAll(csvToRows(await res.text()));
-    RAW_DATA = recs;
-    DATA_SOURCE = recs.length ? 'Google Sheet' : 'Google Sheet (sin auditorías cargadas todavía)';
+    const actual = await obtenerUsuarioActual();
+    if(!actual){
+      RAW_DATA = [];
+      DATA_SOURCE = 'no autenticado — entrá desde el panel principal';
+      reloadDashboard();
+      updateFuente(DATA_SOURCE);
+      return;
+    }
+    const vista = new URLSearchParams(location.search).get('vista');
+    let query = supabaseClient.from('auditorias_siembra').select('*');
+    if(vista === 'mia') query = query.eq('auditor_id', actual.session.user.id);
+    const { data, error } = await query;
+    if(error) throw error;
+    RAW_DATA = buildAll((data||[]).map(mapSupabaseRow));
+    DATA_SOURCE = RAW_DATA.length ? 'Supabase' : 'Supabase (sin auditorías cargadas todavía)';
     reloadDashboard();
   }catch(err){
-    DATA_SOURCE = 'datos embebidos (no se pudo leer la planilla)';
-    console.warn('No se pudo leer la Google Sheet:', err);
+    DATA_SOURCE = 'error al leer la base (' + (err.message||err) + ')';
+    console.warn('No se pudo leer Supabase:', err);
   }
   updateFuente();
 }

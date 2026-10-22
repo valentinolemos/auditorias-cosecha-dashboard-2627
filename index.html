@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Auditorías de Maquinaria — Estancia San Luis</title>
+<title>Auditorías de Maquinaria — Grupo Duhau</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
   :root{
     --bg:#f4f6f8; --primary:#1d4e5f; --primary-light:#2c7a92; --text:#1f2937; --text-soft:#6b7280; --border:#e2e6ea;
@@ -14,8 +15,20 @@
     background:linear-gradient(120deg,var(--primary) 0%,var(--primary-light) 100%);
     color:#fff; padding:16px 24px 0; display:flex; flex-direction:column; gap:12px;
   }
+  header.topbar .fila-superior{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;}
   header.topbar .titulo{font-size:19px; font-weight:600;}
   header.topbar .sub{font-size:12px; opacity:.85; margin-top:2px;}
+  .sesion{display:flex; align-items:center; gap:10px; font-size:12.5px;}
+  .sesion button{
+    background:rgba(255,255,255,.15); border:none; color:#fff; padding:6px 12px; border-radius:999px;
+    font-size:12px; cursor:pointer;
+  }
+  .vista-selector{display:flex; gap:6px;}
+  .vista-btn{
+    padding:6px 14px; border:1px solid rgba(255,255,255,.4); background:transparent; color:#fff;
+    font-size:12.5px; border-radius:999px; cursor:pointer; opacity:.8;
+  }
+  .vista-btn.activa{background:#fff; color:var(--primary); opacity:1; font-weight:600;}
   .tabs{display:flex; gap:4px;}
   .tab{
     padding:10px 20px; border:none; background:rgba(255,255,255,.12); color:#fff; font-size:13.5px; font-weight:600;
@@ -23,31 +36,122 @@
   }
   .tab.activa{background:var(--bg); color:var(--primary); opacity:1;}
   .tab:disabled{cursor:default; opacity:.4;}
-  iframe{width:100%; height:calc(100vh - 84px); border:none; display:block; background:var(--bg);}
+  iframe{width:100%; height:calc(100vh - 118px); border:none; display:block; background:var(--bg);}
+  #appShell{display:none;}
+
+  .login-pantalla{
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:16px; text-align:center; padding:24px;
+  }
+  .login-pantalla h1{color:var(--primary); margin:0;}
+  .login-pantalla p{color:var(--text-soft); max-width:360px; margin:0;}
+  .boton-login{
+    background:var(--primary); color:#fff; border:none; padding:12px 22px; border-radius:8px;
+    font-size:15px; cursor:pointer;
+  }
+  .cargando{min-height:100vh; display:flex; align-items:center; justify-content:center; color:var(--text-soft);}
 </style>
 </head>
 <body>
 
-<header class="topbar">
-  <div>
-    <div class="titulo">🚜 Auditorías de Maquinaria</div>
-    <div class="sub">Estancia San Luis — elegí la labor</div>
-  </div>
-  <div class="tabs">
-    <button class="tab activa" data-src="cosecha.html" onclick="cambiar(this)">🌾 Cosecha</button>
-    <button class="tab" data-src="siembra.html" onclick="cambiar(this)">🌱 Siembra</button>
-    <button class="tab" data-src="fertilizacion.html" onclick="cambiar(this)">🧪 Fertilización</button>
-  </div>
-</header>
+<div id="cargando" class="cargando">Cargando…</div>
 
-<iframe id="marco" src="cosecha.html" title="Dashboard"></iframe>
+<div id="loginPantalla" class="login-pantalla" style="display:none;">
+  <h1>🚜 Auditorías de Maquinaria</h1>
+  <p>Iniciá sesión con tu cuenta de la empresa para ver el panel.</p>
+  <button class="boton-login" onclick="iniciarSesionGoogle()">Iniciar sesión con Google</button>
+</div>
 
+<div id="appShell">
+  <header class="topbar">
+    <div class="fila-superior">
+      <div>
+        <div class="titulo">🚜 Auditorías de Maquinaria</div>
+        <div class="sub">Grupo Duhau — elegí la labor</div>
+      </div>
+      <div class="sesion">
+        <div class="vista-selector" id="vistaSelector"></div>
+        <span id="nombreUsuario"></span>
+        <button onclick="cerrarSesion()">Cerrar sesión</button>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="tab activa" data-src="cosecha.html" onclick="cambiar(this)">🌾 Cosecha</button>
+      <button class="tab" data-src="siembra.html" onclick="cambiar(this)">🌱 Siembra</button>
+      <button class="tab" data-src="fertilizacion.html" onclick="cambiar(this)">🧪 Fertilización</button>
+    </div>
+  </header>
+
+  <iframe id="marco" title="Dashboard"></iframe>
+</div>
+
+<script src="supabase-client.js"></script>
+<script src="auth.js"></script>
 <script>
+let tabActivo = 'cosecha.html';
+let vistaActual = 'unidad'; // 'mia' | 'unidad' | 'madre'
+
 function cambiar(btn){
   document.querySelectorAll('.tab').forEach(b => b.classList.remove('activa'));
   btn.classList.add('activa');
-  document.getElementById('marco').src = btn.dataset.src;
+  tabActivo = btn.dataset.src;
+  cargarIframe();
 }
+
+function cargarIframe(){
+  document.getElementById('marco').src = tabActivo + '?vista=' + vistaActual;
+}
+
+function elegirVista(vista, btn){
+  vistaActual = vista;
+  document.querySelectorAll('.vista-btn').forEach(b => b.classList.remove('activa'));
+  btn.classList.add('activa');
+  cargarIframe();
+}
+
+function armarSelectorVista(usuario){
+  const cont = document.getElementById('vistaSelector');
+  cont.innerHTML = '';
+  if (usuario.rol === 'gerencia') {
+    vistaActual = 'madre';
+    const span = document.createElement('span');
+    span.textContent = 'Tablero madre — todas las unidades';
+    cont.appendChild(span);
+    return;
+  }
+  const opciones = [
+    { vista: 'unidad', label: 'Mi unidad' },
+    { vista: 'mia', label: 'Mi tablero' },
+  ];
+  opciones.forEach((o, i) => {
+    const b = document.createElement('button');
+    b.className = 'vista-btn' + (o.vista === vistaActual ? ' activa' : '');
+    b.textContent = o.label;
+    b.onclick = () => elegirVista(o.vista, b);
+    cont.appendChild(b);
+  });
+}
+
+async function arrancar(){
+  const actual = await obtenerUsuarioActual();
+  document.getElementById('cargando').style.display = 'none';
+  if (!actual) {
+    document.getElementById('loginPantalla').style.display = 'flex';
+    return;
+  }
+  if (!actual.usuario) {
+    document.getElementById('loginPantalla').style.display = 'flex';
+    document.getElementById('loginPantalla').innerHTML =
+      '<h1>🚜 Auditorías de Maquinaria</h1><p>Tu cuenta no tiene acceso asignado todavía. Avisale a Valentino.</p>' +
+      '<button class="boton-login" onclick="cerrarSesion()">Volver a intentar</button>';
+    return;
+  }
+  document.getElementById('nombreUsuario').textContent = actual.usuario.nombre;
+  armarSelectorVista(actual.usuario);
+  document.getElementById('appShell').style.display = 'block';
+  cargarIframe();
+}
+arrancar();
 </script>
 
 </body>
